@@ -136,9 +136,9 @@ app.post("/api/upload-cv", { preHandler: requireAuth }, async (request, reply) =
   let rawText = "";
 
   if (isPdf) {
-    const pdfParse = (await import("pdf-parse")).default;
-    const parsed = await pdfParse(buffer);
-    rawText = parsed.text.trim();
+    const { extractText } = await import("unpdf");
+    const { text } = await extractText(new Uint8Array(buffer), { mergePages: true });
+    rawText = (text as string).trim();
   }
 
   if (isDocx) {
