@@ -8,7 +8,7 @@ import { fromNodeHeaders } from "better-auth/node";
 import { auth } from "./auth.js";
 import { analyzeCvAgainstJobDescription, extractSkillsFromCvWithAI } from "./ai.js";
 import { sql } from "./db.js";
-import { requireAuth } from "./middleware.js";
+import { requireAuth } from "./auth-guard.js";
 
 const app = Fastify({ logger: true });
 const port = Number(process.env.PORT ?? 4000);
