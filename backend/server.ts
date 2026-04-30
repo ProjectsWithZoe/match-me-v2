@@ -9,15 +9,10 @@ import { auth } from "./auth.js";
 import { analyzeCvAgainstJobDescription, extractSkillsFromCvWithAI } from "./ai.js";
 import { sql } from "./db.js";
 import { requireAuth } from "./auth-guard.js";
+import { allowedOrigins } from "./origins.js";
 
 const app = Fastify({ logger: true });
 const port = Number(process.env.PORT ?? 4000);
-const clientOrigin = process.env.CLIENT_ORIGIN ?? "http://localhost:5173";
-const extraOrigins = (process.env.CLIENT_ORIGINS ?? "")
-  .split(",")
-  .map((origin) => origin.trim())
-  .filter(Boolean);
-const allowedOrigins = new Set([clientOrigin, ...extraOrigins]);
 
 await app.register(fastifyRateLimit, {
   max: 100,
@@ -36,7 +31,7 @@ await app.register(fastifyCors, {
       return;
     }
 
-    callback(new Error("CORS origin not allowed"), false);
+    callback(null, false);
   },
   credentials: true,
 });
