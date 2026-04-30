@@ -18,10 +18,6 @@ type CvSkillExtractionResult = {
 const CLAUDE_API_KEY = process.env.ANTHROPIC_API_KEY;
 const CLAUDE_MODEL = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-6";
 
-if (!CLAUDE_API_KEY) {
-  throw new Error("ANTHROPIC_API_KEY is required");
-}
-
 /* ================= HELPERS ================= */
 
 const isStringArray = (value: unknown): value is string[] =>
@@ -82,6 +78,10 @@ async function withRetry<T>(
  * Core Claude request
  */
 async function callClaude(prompt: string): Promise<string> {
+  if (!CLAUDE_API_KEY) {
+    throw new Error("ANTHROPIC_API_KEY is required");
+  }
+
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
