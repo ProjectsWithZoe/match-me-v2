@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -19,6 +20,7 @@ type Props = {
   isSavingCv: boolean;
   isAuthLoading: boolean;
   onSaveCv: (file: File) => Promise<boolean>;
+  onDeleteCv: () => Promise<void>;
   onSignOut: () => Promise<void>;
 };
 
@@ -30,15 +32,39 @@ export function ProfileSheet({
   isSavingCv,
   isAuthLoading,
   onSaveCv,
+  onDeleteCv,
   onSignOut,
 }: Props) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [isDeletingCv, setIsDeletingCv] = useState(false);
+
   const handleSignOut = async () => {
     await onSignOut();
     onOpenChange(false);
   };
 
+  const handleDeleteClick = () => setConfirmDelete(true);
+
+  const handleConfirmDelete = async () => {
+    setIsDeletingCv(true);
+    try {
+      await onDeleteCv();
+    } finally {
+      setIsDeletingCv(false);
+      setConfirmDelete(false);
+    }
+  };
+
+  const handleCancelDelete = () => setConfirmDelete(false);
+
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) setConfirmDelete(false);
+        onOpenChange(next);
+      }}
+    >
       <SheetContent className="w-full overflow-y-auto sm:max-w-md">
         <SheetHeader>
           <SheetTitle>Profile</SheetTitle>
@@ -72,24 +98,65 @@ export function ProfileSheet({
             <p className="mb-3 text-xs text-zinc-500">
               Saved once — replace any time. Used for all analyses.
             </p>
-            <CVUpload onSave={onSaveCv} isSaving={isSavingCv} />
+            <CVUpload
+              onSave={onSaveCv}
+              isSaving={isSavingCv}
+              hasExistingCv={!!savedCv}
+            />
           </div>
 
-          {/* Extracted skills */}
+          {/* Extracted skills + delete */}
           {savedCv?.parsedSkills && savedCv.parsedSkills.length > 0 && (
             <>
               <Separator />
-              <div>
-                <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-zinc-400">
-                  Extracted Skills
-                </h3>
-                <div className="flex flex-wrap gap-1.5">
-                  {savedCv.parsedSkills.map((skill) => (
-                    <Badge key={skill} className="border-0 bg-zinc-100 text-zinc-800 hover:bg-zinc-200">
-                      {skill}
-                    </Badge>
-                  ))}
+              <div className="space-y-3">
+                <div>
+                  <h3 className="mb-2 text-xs font-semibold uppercase tracking-widest text-zinc-400">
+                    Extracted Skills
+                  </h3>
+                  <div className="flex flex-wrap gap-1.5">
+                    {savedCv.parsedSkills.map((skill) => (
+                      <Badge key={skill} className="border-0 bg-zinc-100 text-zinc-800 hover:bg-zinc-200">
+                        {skill}
+                      </Badge>
+                    ))}
+                  </div>
                 </div>
+
+                {/* Delete CV */}
+                {!confirmDelete ? (
+                  <button
+                    type="button"
+                    onClick={handleDeleteClick}
+                    className="text-xs text-zinc-400 hover:text-red-600 transition-colors"
+                  >
+                    Delete CV
+                  </button>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-xs text-red-600">
+                      Permanently delete your CV? This cannot be undone.
+                    </p>
+                    <div className="flex items-center gap-3">
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={handleConfirmDelete}
+                        disabled={isDeletingCv}
+                        className="h-7 text-xs"
+                      >
+                        {isDeletingCv ? "Deleting…" : "Yes, delete"}
+                      </Button>
+                      <button
+                        type="button"
+                        onClick={handleCancelDelete}
+                        className="text-xs text-zinc-500 hover:text-zinc-700"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </>
           )}

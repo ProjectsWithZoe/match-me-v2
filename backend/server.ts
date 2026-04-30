@@ -49,9 +49,27 @@ app.get("/health", async () => {
 app.route({
   method: ["GET", "POST"],
   url: "/api/auth/*",
+  config: {
+    rateLimit: { max: 10, timeWindow: "15 minutes" },
+  },
   async handler(request, reply) {
     try {
       const requestUrl = new URL(request.url, `http://${request.headers.host}`);
+      const path = requestUrl.pathname;
+      const body = (request.body ?? {}) as Record<string, unknown>;
+
+      // Validate password length before creating account or resetting password
+      const isSignUp = request.method === "POST" && path.endsWith("/sign-up/email");
+      const isResetPassword = request.method === "POST" && path.endsWith("/reset-password");
+      if (isSignUp || isResetPassword) {
+        const password = typeof body.password === "string" ? body.password : "";
+        const newPassword = typeof body.newPassword === "string" ? body.newPassword : "";
+        const passwordToCheck = isSignUp ? password : newPassword;
+        if (passwordToCheck.length < 8) {
+          return reply.status(400).send({ error: "Password must be at least 8 characters." });
+        }
+      }
+
       const headers = fromNodeHeaders(request.headers);
 
       const authRequest = new Request(requestUrl.toString(), {
@@ -106,6 +124,25 @@ app.get("/api/cv", { preHandler: requireAuth }, async (request, reply) => {
   }
 
   return reply.send({ cv: cvRows[0] });
+});
+
+app.delete("/api/cv", { preHandler: requireAuth }, async (request, reply) => {
+  const userId = request.user?.id;
+  if (typeof userId !== "string" || userId.length === 0) {
+    return reply.status(401).send({ error: "Unauthorized" });
+  }
+
+  const result = await sql`
+    DELETE FROM "CV"
+    WHERE "userId" = ${userId}
+    RETURNING "id"
+  `;
+
+  if (!result[0]) {
+    return reply.status(404).send({ error: "No CV found for user" });
+  }
+
+  return reply.send({ message: "CV deleted" });
 });
 
 app.post("/api/upload-cv", { preHandler: requireAuth }, async (request, reply) => {

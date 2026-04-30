@@ -67,6 +67,43 @@ export async function signOut(): Promise<void> {
   if (!res.ok) throw new Error("Logout failed");
 }
 
+export async function deleteCv(): Promise<void> {
+  const res = await fetch(url("/api/cv"), {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const data = (await res.json()) as { error?: string };
+    throw new Error(data.error ?? "Failed to delete CV");
+  }
+}
+
+export async function forgotPassword(email: string): Promise<void> {
+  const res = await fetch(url("/api/auth/forget-password"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ email, redirectTo: `${window.location.origin}/reset-password` }),
+  });
+  if (!res.ok) {
+    const data = (await res.json()) as { error?: string };
+    throw new Error(data.error ?? "Failed to send reset email");
+  }
+}
+
+export async function resetPassword(token: string, newPassword: string): Promise<void> {
+  const res = await fetch(url("/api/auth/reset-password"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ token, newPassword }),
+  });
+  if (!res.ok) {
+    const data = (await res.json()) as { error?: string };
+    throw new Error(data.error ?? "Failed to reset password");
+  }
+}
+
 export async function demoAnalyze(jobDescription: string): Promise<AnalysisResult> {
   const res = await fetch(url("/api/demo/analyze"), {
     method: "POST",

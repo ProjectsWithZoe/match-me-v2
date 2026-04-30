@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { fetchCv, uploadCv, type SavedCv } from "@/lib/api";
+import { deleteCv as deleteCvApi, fetchCv, uploadCv, type SavedCv } from "@/lib/api";
 
 export function useCV() {
   const [savedCv, setSavedCv] = useState<SavedCv | null>(null);
@@ -45,7 +45,18 @@ export function useCV() {
     }
   };
 
+  const deleteCv = async () => {
+    try {
+      await deleteCvApi();
+      setSavedCv(null);
+      toast.success("CV deleted.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete CV");
+    }
+  };
+
+  // Local-only state clear — used on sign-out, no backend call
   const clearCv = () => setSavedCv(null);
 
-  return { savedCv, isLoadingCv, isSavingCv, loadCv, saveCv, clearCv };
+  return { savedCv, isLoadingCv, isSavingCv, loadCv, saveCv, deleteCv, clearCv };
 }

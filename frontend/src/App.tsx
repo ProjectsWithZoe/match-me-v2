@@ -10,8 +10,8 @@ import { useCV } from "@/hooks/useCV";
 import { useAnalysis } from "@/hooks/useAnalysis";
 
 function App() {
-  const { user, isAuthLoading, loadProfile, signUp, signIn, signOut } = useAuth();
-  const { savedCv, isSavingCv, loadCv, saveCv, clearCv } = useCV();
+  const { user, isAuthLoading, loadProfile, signUp, signIn, signOut, forgotPassword } = useAuth();
+  const { savedCv, isSavingCv, loadCv, saveCv, deleteCv, clearCv } = useCV();
   const { analysis, matchScore, hasAnalysis, isAnalyzing, onAnalyze, resetAnalysis } = useAnalysis();
 
   const [jobDescription, setJobDescription] = useState("");
@@ -84,6 +84,7 @@ function App() {
         onSignUp={handleSignUp}
         onSignIn={handleSignIn}
         onSignOut={handleSignOut}
+        onForgotPassword={forgotPassword}
       />
 
       <ProfileSheet
@@ -94,6 +95,7 @@ function App() {
         isSavingCv={isSavingCv}
         isAuthLoading={isAuthLoading}
         onSaveCv={saveCv}
+        onDeleteCv={deleteCv}
         onSignOut={handleSignOut}
       />
 
