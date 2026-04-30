@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { analyzeJob, type AnalysisResult } from "@/lib/api";
+import { analyzeCv, type AnalysisResult } from "@/lib/api";
 
 const emptyAnalysis: AnalysisResult = {
   "Matching Skills": [],
@@ -22,14 +22,18 @@ export function useAnalysis() {
 
   const hasAnalysis = Object.values(analysis).some((items) => items.length > 0);
 
-  const onAnalyze = async (jobDescription: string) => {
+  const onAnalyze = async (jobDescription: string, cvFile: File | null) => {
     if (!jobDescription.trim()) {
       toast.error("Paste a job description first.");
       return;
     }
+    if (!cvFile) {
+      toast.error("Upload your CV first.");
+      return;
+    }
     setIsAnalyzing(true);
     try {
-      const result = await analyzeJob(jobDescription);
+      const result = await analyzeCv(cvFile, jobDescription);
       setAnalysis(result);
       toast.success("Analysis complete.");
     } catch (err) {

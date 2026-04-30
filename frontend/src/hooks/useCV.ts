@@ -1,25 +1,11 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { deleteCv as deleteCvApi, fetchCv, uploadCv, type SavedCv } from "@/lib/api";
+import type { SavedCv } from "@/lib/api";
 
 export function useCV() {
   const [savedCv, setSavedCv] = useState<SavedCv | null>(null);
-  const [isLoadingCv, setIsLoadingCv] = useState(false);
+  const [cvFile, setCvFile] = useState<File | null>(null);
   const [isSavingCv, setIsSavingCv] = useState(false);
-
-  const loadCv = async () => {
-    setIsLoadingCv(true);
-    try {
-      const cv = await fetchCv();
-      setSavedCv(cv);
-      return cv;
-    } catch {
-      setSavedCv(null);
-      return null;
-    } finally {
-      setIsLoadingCv(false);
-    }
-  };
 
   const saveCv = async (file: File) => {
     const lower = file.name.toLowerCase();
@@ -33,9 +19,9 @@ export function useCV() {
     }
     setIsSavingCv(true);
     try {
-      const message = await uploadCv(file);
-      toast.success(message);
-      await loadCv();
+      setCvFile(file);
+      setSavedCv({ id: file.name, fileName: file.name });
+      toast.success("CV ready.");
       return true;
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save CV");
@@ -46,17 +32,10 @@ export function useCV() {
   };
 
   const deleteCv = async () => {
-    try {
-      await deleteCvApi();
-      setSavedCv(null);
-      toast.success("CV deleted.");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to delete CV");
-    }
+    setCvFile(null);
+    setSavedCv(null);
+    toast.success("CV removed.");
   };
 
-  // Local-only state clear — used on sign-out, no backend call
-  const clearCv = () => setSavedCv(null);
-
-  return { savedCv, isLoadingCv, isSavingCv, loadCv, saveCv, deleteCv, clearCv };
+  return { savedCv, cvFile, isSavingCv, saveCv, deleteCv };
 }

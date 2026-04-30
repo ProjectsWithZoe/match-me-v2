@@ -2,16 +2,71 @@ import Fastify from "fastify";
 import fastifyCors from "@fastify/cors";
 import fastifyMultipart from "@fastify/multipart";
 import fastifyRateLimit from "@fastify/rate-limit";
-import { randomUUID } from "node:crypto";
 import mammoth from "mammoth";
-import { fromNodeHeaders } from "better-auth/node";
-import { auth } from "./auth.js";
-import { analyzeCvAgainstJobDescription, extractSkillsFromCvWithAI } from "./ai.js";
-import { sql } from "./db.js";
-import { requireAuth } from "./auth-guard.js";
+import { analyzeCvAgainstJobDescription } from "./ai.js";
 import { allowedOrigins } from "./origins.js";
 
 const app = Fastify({ logger: true });
+
+type UploadedCvFile = {
+  filename: string;
+  mimetype: string;
+  fields?: Record<string, unknown>;
+  toBuffer: () => Promise<Buffer>;
+};
+
+type CvTextResult =
+  | { rawText: string }
+  | { error: string; status: 400 | 415 };
+
+const getMultipartFieldValue = (fields: Record<string, unknown> | undefined, name: string) => {
+  const field = fields?.[name];
+  const firstField = Array.isArray(field) ? field[0] : field;
+
+  if (
+    firstField &&
+    typeof firstField === "object" &&
+    "value" in firstField &&
+    typeof firstField.value === "string"
+  ) {
+    return firstField.value.trim();
+  }
+
+  return "";
+};
+
+const extractCvTextFromFile = async (file: UploadedCvFile): Promise<CvTextResult> => {
+  const filename = file.filename.toLowerCase();
+  const isPdf = file.mimetype === "application/pdf" || filename.endsWith(".pdf");
+  const isDocx =
+    file.mimetype ===
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+    filename.endsWith(".docx");
+
+  if (!isPdf && !isDocx) {
+    return { error: "Only PDF and DOCX files are supported", status: 415 };
+  }
+
+  const buffer = await file.toBuffer();
+  let rawText = "";
+
+  if (isPdf) {
+    const { extractText } = await import("unpdf");
+    const { text } = await extractText(new Uint8Array(buffer), { mergePages: true });
+    rawText = (text as string).trim();
+  }
+
+  if (isDocx) {
+    const parsed = await mammoth.extractRawText({ buffer });
+    rawText = parsed.value.trim();
+  }
+
+  if (!rawText) {
+    return { error: "Could not extract text from file", status: 400 };
+  }
+
+  return { rawText };
+};
 
 await app.register(fastifyRateLimit, {
   max: 100,
@@ -32,188 +87,13 @@ await app.register(fastifyCors, {
 
     callback(null, false);
   },
-  credentials: true,
+  credentials: false,
 });
+
 await app.register(fastifyMultipart);
 
 app.get("/health", async () => {
   return { status: "ok" };
-});
-
-app.route({
-  method: ["GET", "POST"],
-  url: "/api/auth/*",
-  config: {
-    rateLimit: { max: 10, timeWindow: "15 minutes" },
-  },
-  async handler(request, reply) {
-    try {
-      const forwardedProto = request.headers["x-forwarded-proto"];
-      const protocol = Array.isArray(forwardedProto)
-        ? forwardedProto[0]
-        : forwardedProto || "http";
-      const requestUrl = new URL(request.url, `${protocol}://${request.headers.host}`);
-      const path = requestUrl.pathname;
-      const body = (request.body ?? {}) as Record<string, unknown>;
-
-      // Validate password length before creating account or resetting password
-      const isSignUp = request.method === "POST" && path.endsWith("/sign-up/email");
-      const isResetPassword = request.method === "POST" && path.endsWith("/reset-password");
-      if (isSignUp || isResetPassword) {
-        const password = typeof body.password === "string" ? body.password : "";
-        const newPassword = typeof body.newPassword === "string" ? body.newPassword : "";
-        const passwordToCheck = isSignUp ? password : newPassword;
-        if (passwordToCheck.length < 8) {
-          return reply.status(400).send({ error: "Password must be at least 8 characters." });
-        }
-      }
-
-      const headers = fromNodeHeaders(request.headers);
-
-      const authRequest = new Request(requestUrl.toString(), {
-        method: request.method,
-        headers,
-        ...(request.body ? { body: JSON.stringify(request.body) } : {}),
-      });
-
-      const response = await auth.handler(authRequest);
-
-      reply.status(response.status);
-      response.headers.forEach((value, key) => {
-        reply.header(key, value);
-      });
-      reply.send(response.body ? await response.text() : null);
-    } catch (error) {
-      app.log.error(error);
-      reply.status(500).send({
-        error: "Internal authentication error",
-        code: "AUTH_FAILURE",
-      });
-    }
-  },
-});
-
-app.get("/api/me", { preHandler: requireAuth }, async (request) => {
-  return {
-    user: request.user,
-    session: request.session,
-  };
-});
-
-app.get("/api/protected", { preHandler: requireAuth }, async () => {
-  return { message: "Authenticated access granted" };
-});
-
-app.get("/api/cv", { preHandler: requireAuth }, async (request, reply) => {
-  const userId = request.user?.id;
-  if (typeof userId !== "string" || userId.length === 0) {
-    return reply.status(401).send({ error: "Unauthorized" });
-  }
-
-  const cvRows = await sql`
-    SELECT "id", "rawText", "parsedSkills"
-    FROM "CV"
-    WHERE "userId" = ${userId}
-    LIMIT 1
-  `;
-
-  if (!cvRows[0]) {
-    return reply.status(404).send({ error: "CV not found for user" });
-  }
-
-  return reply.send({ cv: cvRows[0] });
-});
-
-app.delete("/api/cv", { preHandler: requireAuth }, async (request, reply) => {
-  const userId = request.user?.id;
-  if (typeof userId !== "string" || userId.length === 0) {
-    return reply.status(401).send({ error: "Unauthorized" });
-  }
-
-  const result = await sql`
-    DELETE FROM "CV"
-    WHERE "userId" = ${userId}
-    RETURNING "id"
-  `;
-
-  if (!result[0]) {
-    return reply.status(404).send({ error: "No CV found for user" });
-  }
-
-  return reply.send({ message: "CV deleted" });
-});
-
-app.post("/api/upload-cv", { preHandler: requireAuth }, async (request, reply) => {
-  const userId = request.user?.id;
-  if (typeof userId !== "string" || userId.length === 0) {
-    return reply.status(401).send({ error: "Unauthorized" });
-  }
-
-  const file = await request.file();
-  if (!file) {
-    return reply.status(400).send({ error: "A CV file is required" });
-  }
-
-  const filename = file.filename.toLowerCase();
-  const isPdf = file.mimetype === "application/pdf" || filename.endsWith(".pdf");
-  const isDocx =
-    file.mimetype ===
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-    filename.endsWith(".docx");
-
-  if (!isPdf && !isDocx) {
-    return reply
-      .status(415)
-      .send({ error: "Only PDF and DOCX files are supported" });
-  }
-
-  const buffer = await file.toBuffer();
-  let rawText = "";
-
-  if (isPdf) {
-    const { extractText } = await import("unpdf");
-    const { text } = await extractText(new Uint8Array(buffer), { mergePages: true });
-    rawText = (text as string).trim();
-  }
-
-  if (isDocx) {
-    const parsed = await mammoth.extractRawText({ buffer });
-    rawText = parsed.value.trim();
-  }
-
-  if (!rawText) {
-    return reply.status(400).send({ error: "Could not extract text from file" });
-  }
-
-  const parsedSkills = await extractSkillsFromCvWithAI(rawText);
-  const parsedSkillsCsv = parsedSkills.join(",");
-
-  let result: Array<Record<string, unknown>> = [];
-  try {
-    result = await sql`
-      INSERT INTO "CV" ("id", "userId", "rawText", "parsedSkills")
-      VALUES (${randomUUID()}, ${userId}, ${rawText}, string_to_array(${parsedSkillsCsv}, ','))
-      ON CONFLICT ("userId")
-      DO UPDATE SET
-        "rawText" = EXCLUDED."rawText",
-        "parsedSkills" = EXCLUDED."parsedSkills"
-      RETURNING "id", "userId", "parsedSkills"
-    `;
-  } catch (error) {
-    const dbError = error as { code?: string };
-    if (dbError.code === "23503") {
-      return reply.status(409).send({
-        error:
-          "User foreign key mismatch. Ensure CV.userId references Better Auth table \"user\".",
-      });
-    }
-    throw error;
-  }
-
-  return reply.send({
-    message: "CV saved",
-    cv: result[0],
-  });
 });
 
 const DEMO_CV_TEXT = `
@@ -224,12 +104,12 @@ Skills: JavaScript, TypeScript, React, Node.js, PostgreSQL,
         REST APIs, Git, Docker, Jest, Agile/Scrum
 
 Experience:
-- Software Engineer, FinPay Ltd (2021–present)
+- Software Engineer, FinPay Ltd (2021-present)
   Built React + TypeScript web apps serving 50k users
   Developed Node.js REST APIs with PostgreSQL
   Set up Docker-based CI/CD pipelines
 
-- Junior Developer, LaunchPad Studio (2020–2021)
+- Junior Developer, LaunchPad Studio (2020-2021)
   Delivered frontend features in React
   Participated in agile sprints and code reviews
 
@@ -250,60 +130,38 @@ app.post(
     if (!jobDescription) {
       return reply.status(400).send({ error: "jobDescription is required" });
     }
+
     const analysis = await analyzeCvAgainstJobDescription(DEMO_CV_TEXT, jobDescription);
     return reply.send(analysis);
-  }
+  },
 );
 
-app.post("/api/analyze", { preHandler: requireAuth }, async (request, reply) => {
-  const userId = request.user?.id;
-  if (typeof userId !== "string" || userId.length === 0) {
-    return reply.status(401).send({ error: "Unauthorized" });
-  }
-
-  const body = (request.body ?? {}) as { jobDescription?: unknown };
-  const jobDescription =
-    typeof body.jobDescription === "string" ? body.jobDescription.trim() : "";
-  if (!jobDescription) {
-    return reply.status(400).send({ error: "jobDescription is required" });
-  }
-
-  const cvRows = await sql`
-    SELECT "rawText", "parsedSkills"
-    FROM "CV"
-    WHERE "userId" = ${userId}
-    LIMIT 1
-  `;
-
-  if (!cvRows[0]) {
-    return reply.status(404).send({ error: "CV not found for user" });
-  }
-
-  const cvText = typeof cvRows[0].rawText === "string" ? cvRows[0].rawText : "";
-  const analysis = await analyzeCvAgainstJobDescription(cvText, jobDescription);
-
-  try {
-    await sql`
-      INSERT INTO "JobAnalysis" ("id", "userId", "jobDescription", "result")
-      VALUES (
-        ${randomUUID()},
-        ${userId},
-        ${jobDescription},
-        CAST(${JSON.stringify(analysis)} AS jsonb)
-      )
-    `;
-  } catch (error) {
-    const dbError = error as { code?: string };
-    if (dbError.code === "23503") {
-      return reply.status(409).send({
-        error:
-          "User foreign key mismatch. Ensure JobAnalysis.userId references Better Auth table \"user\".",
-      });
+app.post(
+  "/api/analyze",
+  {
+    config: {
+      rateLimit: { max: 10, timeWindow: "1 hour" },
+    },
+  },
+  async (request, reply) => {
+    const file = await request.file();
+    if (!file) {
+      return reply.status(400).send({ error: "A CV file is required" });
     }
-    throw error;
-  }
 
-  return reply.send(analysis);
-});
+    const jobDescription = getMultipartFieldValue(file.fields, "jobDescription");
+    if (!jobDescription) {
+      return reply.status(400).send({ error: "jobDescription is required" });
+    }
+
+    const cvText = await extractCvTextFromFile(file);
+    if ("error" in cvText) {
+      return reply.status(cvText.status).send({ error: cvText.error });
+    }
+
+    const analysis = await analyzeCvAgainstJobDescription(cvText.rawText, jobDescription);
+    return reply.send(analysis);
+  },
+);
 
 export { app };
