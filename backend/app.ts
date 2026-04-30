@@ -48,7 +48,11 @@ app.route({
   },
   async handler(request, reply) {
     try {
-      const requestUrl = new URL(request.url, `http://${request.headers.host}`);
+      const forwardedProto = request.headers["x-forwarded-proto"];
+      const protocol = Array.isArray(forwardedProto)
+        ? forwardedProto[0]
+        : forwardedProto || "http";
+      const requestUrl = new URL(request.url, `${protocol}://${request.headers.host}`);
       const path = requestUrl.pathname;
       const body = (request.body ?? {}) as Record<string, unknown>;
 
